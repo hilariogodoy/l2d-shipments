@@ -42,7 +42,11 @@ df=pull_from_snowflake('''    SELECT
             ROUTE_ID,
             MILESTONE_LP_TO_MILESTONE_300_OR_GREATER_BD AS FIRST_MILE_TRANSIT_TIME_BD,
             ORIGIN_COUNTRY,
-            label_print_year_week_utc,
+            LABEL_PRINT_YEAR_WEEK_UTC,
+            CASE 
+                WHEN DAYOFWEEK(label_print_date_utc) IN (6, 0) THEN TRUE 
+                ELSE FALSE 
+            END AS LABEL_PRINT_ON_WEEKEND,
             --CAST(label_print_utc_ts AS TIMESTAMP_NTZ) AS LABEL_PRINT_UTC_TS, // Model needs dates as timestamps_ntz
             --CAST(delivery_est_utc_ts AS TIMESTAMP_NTZ) AS DELIVERY_EST_UTC_TS,
             PARCEL_LENGTH_OPC,
@@ -74,16 +78,17 @@ fillna_cols_num = ['PARCEL_LENGTH_OPC', 'PARCEL_WIDTH_OPC', 'PARCEL_HEIGHT_OPC',
 cat_features = ['X_3PL_NAME', 'ORIGIN_PROCESSING_CENTER',
         'PASSPORT_INVOICE_SERVICE_NAME', 'DELIVERY_PARTNER_CARRIER',
         'DESTINATION_COUNTRY', 'DESTINATION_STATE', 'ORIGIN_COUNTRY'
-        ,'ROUTE_ID']
+        ,'ROUTE_ID','LABEL_PRINT_YEAR_WEEK_UTC', 'LABEL_PRINT_ON_WEEKEND']
+# 1. Ensure numeric types (Fixes your TypeError)
+df[fillna_cols_num] = df[fillna_cols_num].apply(pd.to_numeric, errors='coerce')
+
+# 2. Fill numeric NaNs with group median
 df[fillna_cols_num] = df[fillna_cols_num].fillna(
     df.groupby('X_3PL_NAME')[fillna_cols_num].transform('median')
 )
 
-df[cat_features]=df[cat_features].fillna('No Data')
-#df=df.drop(columns=['LABEL_PRINT_UTC_TS','DELIVERY_EST_UTC_TS'])
-
-
-df[cat_features]=df[cat_features].astype(str)
+# 3. Handle categorical NaNs and cast to string
+df[cat_features] = df[cat_features].fillna('No Data').astype(str)
 
 #%%
 from catboost import CatBoostClassifier, Pool
@@ -115,7 +120,12 @@ model = CatBoostClassifier(
 
 model.fit(train_pool, eval_set=test_pool, early_stopping_rounds=50)
 
+#%%
+from datetime import datetime
+now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+model.save_model(f'l2d_shipments_{now}.bin')
 
+#%%
 # Instead of model.predict(), use probability
 probabilities = model.predict_proba(X_test)[:, 1]
 
@@ -138,7 +148,7 @@ plt.show()
 
 print(classification_report(y_test, preds))
 
-
+#%%
 
 import numpy as np
 
@@ -160,3 +170,5 @@ plt.figure(figsize=(10, 6))
 sns.barplot(x=sorted_importance, y=sorted_names)
 plt.title('What is driving our shipment delays?')
 plt.show()
+
+# %%
