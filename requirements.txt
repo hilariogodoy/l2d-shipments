@@ -1,0 +1,13 @@
+snowflake-connector-python[pandas]
+python-dotenv
+pandas
+pyarrow
+fastparquet
+scikit-learn
+catboost
+lightgbm
+xgboost
+streamlit
+plotly
+matplotlib
+seaborn
